@@ -4,6 +4,9 @@ const regeneratorRuntime = require('../../utils/runtime.js');
 const util = require('../../utils/util.js');
 const app = getApp();
 import Poster from '../../utils/poster';
+import { async } from '../../utils/runtime';
+let rewardedVideoAd = null
+
 Page({
 
   /**
@@ -29,7 +32,12 @@ Page({
     nodata_str: "暂无评论，赶紧抢沙发吧",
     isShowPosterModal: false,//是否展示海报弹窗
     posterImageUrl: "",//海报地址
-    showBanner: true
+    showBanner: false,
+    showBannerId: "",
+    hideArticle: '',//400rpx
+    isVip: false,
+    totalPoints: 0,
+    pointsModal: false
   },
 
   /**
@@ -37,6 +45,7 @@ Page({
    */
   onLoad: async function (options) {
     let that = this;
+    //1.授权
     app.checkUserInfo(function (userInfo, isLogin) {
       if (!isLogin) {
         that.setData({
@@ -52,8 +61,52 @@ Page({
     if (options.scene) {
       blogId = decodeURIComponent(options.scene);
     }
+    let advert = app.globalData.advert
+    //验证是否是VIP
+    let isVip = false
+    let res = await api.getMemberInfo(app.globalData.openid)
+    if (res.data.length > 0) {
+      isVip = res.data[0].level == 5
+      that.setData({
+        isVip: isVip,
+        totalPoints: res.data[0].totalPoints
+      })
+    }
+    //广告加载
+    if (advert.readMoreStatus) {
+      var openAded = false
+      var openAdLogs = wx.getStorageSync('openAdLogs') || [];
+      if (openAdLogs.length > 0) {
+        for (var i = 0; i < openAdLogs.length; i++) {
+          if (openAdLogs[i].id == blogId) {
+            openAded = true;
+            break;
+          }
+        }
+      }
+      that.setData({
+        hideArticle: openAded ? "" : "700rpx"
+      })
+      that.loadInterstitialAd(advert.readMoreId);
+    }
+    if (advert.bannerStatus) {
+      that.setData({
+        showBanner: true,
+        showBannerId: advert.bannerId
+      })
+    }
+    //获取文章详情&关联信息
     await that.getDetail(blogId)
     await that.getPostRelated(that.data.post._id)
+  },
+
+  /**
+   * 
+   */
+  onUnload: function () {
+    if (rewardedVideoAd && rewardedVideoAd.destroy) {
+      rewardedVideoAd.destroy()
+    }
   },
   /**
    * 页面上拉触底事件的处理函数
@@ -137,6 +190,9 @@ Page({
     })
     let that = this
     let postDetail = await api.getPostDetail(blogId);
+    console.info(postDetail)
+    let content = app.towxml(postDetail.result.content, 'markdown');
+    postDetail.result.content = content
     that.setData({
       post: postDetail.result
     })
@@ -305,74 +361,125 @@ Page({
   /**
  * 获取订阅消息
  */
-  submitContent: async function (content, commentPage,accept) {
+  submitContent: async function (content, commentPage, accept) {
     let that = this
-    try {
-      wx.showLoading({
-        title: '加载中...',
+    let checkResult = await api.checkPostComment(content)
+    if (!checkResult.result) {
+      wx.showToast({
+        title: '评论内容存在敏感信息',
+        icon: 'none',
+        duration: 2000
       })
-      if (that.data.commentId === "") {
-        var data = {
-          postId: that.data.post._id,
-          cNickName: that.data.userInfo.nickName,
-          cAvatarUrl: that.data.userInfo.avatarUrl,
-          cOpenId: app.globalData.openid,
-          timestamp: new Date().getTime(),
-          createDate: util.formatTime(new Date()),
-          comment: content,
-          childComment: [],
-          flag: 1
-        }
-        await api.addPostComment(data,accept)
+      return
+    }
+
+    if (that.data.commentId === "") {
+      var data = {
+        postId: that.data.post._id,
+        cNickName: that.data.userInfo.nickName,
+        cAvatarUrl: that.data.userInfo.avatarUrl,
+        cOpenId: app.globalData.openid,
+        timestamp: new Date().getTime(),
+        createDate: util.formatTime(new Date()),
+        comment: content,
+        childComment: [],
+        flag: 1,
+        isVip:that.data.isVip
       }
-      else {
-        var childData = [{
-          cOpenId: app.globalData.openid,
-          cNickName: that.data.userInfo.nickName,
-          cAvatarUrl: that.data.userInfo.avatarUrl,
-          timestamp: new Date().getTime(), //new Date(),
-          createDate: util.formatTime(new Date()),
-          comment: content,
-          tNickName: that.data.toName,
-          tOpenId: that.data.toOpenId,
-          flag: 1
-        }]
-        await api.addPostChildComment(that.data.commentId, that.data.post._id, childData,accept)
+      await api.addPostComment(data, accept)
+    }
+    else {
+      var childData = [{
+        cOpenId: app.globalData.openid,
+        cNickName: that.data.userInfo.nickName,
+        cAvatarUrl: that.data.userInfo.avatarUrl,
+        timestamp: new Date().getTime(), //new Date(),
+        createDate: util.formatTime(new Date()),
+        comment: content,
+        tNickName: that.data.toName,
+        tOpenId: that.data.toOpenId,
+        flag: 1,
+        isVip:that.data.isVip
+      }]
+      await api.addPostChildComment(that.data.commentId, that.data.post._id, childData, accept)
+    }
+
+    let commentList = await api.getPostComments(commentPage, that.data.post._id)
+    if (commentList.data.length === 0) {
+      that.setData({
+        nomore: true
+      })
+      if (commentPage === 1) {
+        that.setData({
+          nodata: true
+        })
+      }
+    }
+    else {
+      let post = that.data.post;
+      post.totalComments = post.totalComments + 1
+      that.setData({
+        commentPage: commentPage + 1,
+        commentList: commentList.data,
+        commentContent: "",
+        nomore: false,
+        nodata: false,
+        post: post,
+        commentId: "",
+        placeholder: "评论...",
+        focus: false,
+        toName: "",
+        toOpenId: ""
+      })
+    }
+
+    wx.showToast({
+      title: '提交成功',
+      icon: 'success',
+      duration: 1500
+    })
+  },
+
+  /**
+   * 提交评论
+   * @param {} e 
+   */
+  formSubmit: function (e) {
+    try {
+      let that = this;
+      let commentPage = 1
+      let content = that.data.commentContent;
+      console.info(content)
+      if (content == undefined || content.length == 0) {
+        wx.showToast({
+          title: '请输入内容',
+          icon: 'none',
+          duration: 1500
+        })
+        return
       }
 
-      let commentList = await api.getPostComments(commentPage, that.data.post._id)
-      if (commentList.data.length === 0) {
-        that.setData({
-          nomore: true
-        })
-        if (commentPage === 1) {
-          that.setData({
-            nodata: true
+      wx.requestSubscribeMessage({
+        tmplIds: [config.subcributeTemplateId],
+        success(res) {
+          wx.showLoading({
+            title: '加载中...',
+          })
+          console.info(res)
+          console.info(res[config.subcributeTemplateId])
+          that.submitContent(content, commentPage, res[config.subcributeTemplateId]).then((res) => {
+            console.info(res)
+            wx.hideLoading()
+          })
+        },
+        fail(res) {
+          console.info(res)
+          wx.showToast({
+            title: '程序有一点点小异常，操作失败啦',
+            icon: 'none',
+            duration: 1500
           })
         }
-      }
-      else {
-        let post = that.data.post;
-        post.totalComments = post.totalComments + 1
-        that.setData({
-          commentPage: commentPage + 1,
-          commentList: commentList.data,
-          commentContent: "",
-          nomore: false,
-          nodata: false,
-          post: post,
-          commentId: "",
-          placeholder: "评论...",
-          focus: false,
-          toName: "",
-          toOpenId: ""
-        })
-      }
-
-      wx.showToast({
-        title: '提交成功',
-        icon: 'success',
-        duration: 1500
       })
     }
     catch (err) {
@@ -382,58 +489,8 @@ Page({
         duration: 1500
       })
       console.info(err)
-    }
-    finally {
       wx.hideLoading()
     }
-  },
-
-  /**
-   * 提交评论
-   * @param {} e 
-   */
-  formSubmit: function (e) {
-
-    let that = this;
-    let commentPage = 1
-    let content = that.data.commentContent;
-    console.info(content)
-    if (content == undefined || content.length == 0) {
-      wx.showToast({
-        title: '请输入内容',
-        icon: 'none',
-        duration: 1500
-      })
-      return
-    }
-
-    //提交评论前进行提示
-    wx.showModal({
-      title: '友情提醒',
-      content: '您的评论管理员审核后才会展现哦～',
-      success (res) {
-        if (res.confirm) {
-          wx.requestSubscribeMessage({
-            tmplIds: [config.subcributeTemplateId],
-            success(res) {
-              console.info(res)
-              console.info(res[config.subcributeTemplateId])
-              that.submitContent(content, commentPage,res[config.subcributeTemplateId]).then((res) => { console.info(res) })
-            },
-            fail(res) {
-              console.info(res)
-              wx.showToast({
-                title: '程序有一点点小异常，操作失败啦',
-                icon: 'none',
-                duration: 1500
-              })
-            }
-          })
-        } else if (res.cancel) {
-          console.log('用户点击取消')
-        }
-      }
-    })
   },
   /**
   * 点击评论内容回复
@@ -707,7 +764,8 @@ Page({
    * towxml点击事件
    * @param {} e 
    */
-  __bind_tap: function (e) {
+  _tap: function (e) {
+    console.info(e)
     try {
       if (e.target.dataset._el.attr.src != undefined) {
         wx.previewImage({
@@ -730,5 +788,153 @@ Page({
     this.setData({
       showBanner: false
     })
-  }
+  },
+
+  /**
+   * 阅读更多
+   */
+  readMore: function () {
+
+    rewardedVideoAd.show()
+      .catch(() => {
+        rewardedVideoAd.load()
+          .then(() => rewardedVideoAd.show())
+          .catch(err => {
+            console.log('激励视频 广告显示失败');
+            that.setData({
+              hideArticle: ''
+            })
+          })
+      })
+  },
+
+  /**
+   * 观看广告
+   */
+  lookAdvert: function () {
+    rewardedVideoAd.show()
+      .catch(() => {
+        rewardedVideoAd.load()
+          .then(() => rewardedVideoAd.show())
+          .catch(err => {
+            console.log('激励视频 广告显示失败');
+            that.setData({
+              hideArticle: ''
+            })
+          })
+      })
+  },
+
+  /**
+   * 隐藏
+   * @param {}} e 
+   */
+  hidePointsModal: async function (e) {
+    this.setData({
+      pointsModal: false
+    })
+  },
+
+  /**
+   * 消费积分
+   */
+  consumePoints: async function () {
+
+    let that = this
+    let info = {}
+    let res = await api.addPoints("readPost", info)
+    if (res.result) {
+      var id = that.data.post._id
+      var nowDate = new Date();
+      nowDate = nowDate.getFullYear() + "-" + (nowDate.getMonth() + 1) + '-' + nowDate.getDate();
+
+      var openAdLogs = wx.getStorageSync('openAdLogs') || [];
+      // 过滤重复值
+      if (openAdLogs.length > 0) {
+        openAdLogs = openAdLogs.filter(function (log) {
+          return log["id"] !== id;
+        });
+      }
+      // 如果超过指定数量不再记录
+      if (openAdLogs.length < 21) {
+        var log = {
+          "id": id,
+          "date": nowDate
+        }
+        openAdLogs.unshift(log);
+        wx.setStorageSync('openAdLogs', openAdLogs);
+        console.log(openAdLogs);
+      }
+      that.setData({
+        hideArticle: '',
+        totalPoints: Number(that.data.totalPoints) - 20,
+        pointsModal: false
+      })
+
+    }
+    else {
+      wx.showToast({
+        title: "小程序有一些些异常",
+        icon: "none",
+        duration: 3000
+      });
+    }
+  },
+
+
+  /**
+   * 初始化广告视频
+   * @param {} excitationAdId 
+   */
+  loadInterstitialAd: function (excitationAdId) {
+    let that = this;
+    if (wx.createRewardedVideoAd) {
+      rewardedVideoAd = wx.createRewardedVideoAd({ adUnitId: excitationAdId })
+      rewardedVideoAd.onLoad(() => {
+        console.log('onLoad event emit')
+      })
+      rewardedVideoAd.onError((err) => {
+        console.log(err);
+        that.setData({
+          hideArticle: ''
+        })
+      })
+      rewardedVideoAd.onClose((res) => {
+
+        var id = that.data.post._id
+        if (res && res.isEnded) {
+          var nowDate = new Date();
+          nowDate = nowDate.getFullYear() + "-" + (nowDate.getMonth() + 1) + '-' + nowDate.getDate();
+
+          var openAdLogs = wx.getStorageSync('openAdLogs') || [];
+          // 过滤重复值
+          if (openAdLogs.length > 0) {
+            openAdLogs = openAdLogs.filter(function (log) {
+              return log["id"] !== id;
+            });
+          }
+          // 如果超过指定数量不再记录
+          if (openAdLogs.length < 21) {
+            var log = {
+              "id": id,
+              "date": nowDate
+            }
+            openAdLogs.unshift(log);
+            wx.setStorageSync('openAdLogs', openAdLogs);
+            console.log(openAdLogs);
+          }
+          this.setData({
+            hideArticle: ''
+          })
+        } else {
+          wx.showToast({
+            title: "完整看完视频才能阅读全文哦",
+            icon: "none",
+            duration: 3000
+          });
+        }
+      })
+    }
+
+  },
 })

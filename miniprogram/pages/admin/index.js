@@ -225,4 +225,15 @@ Page({
       url: '../admin/subscribe/subscribe'
     })
   },
+
+  showAdvert:async function (e) {
+    wx.navigateTo({
+      url: '../admin/advert/advert'
+    })
+  },
+  showMember:async function (e) {
+    wx.navigateTo({
+      url: '../admin/member/member'
+    })
+  },
 })

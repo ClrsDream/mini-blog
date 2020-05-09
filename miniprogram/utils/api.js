@@ -4,6 +4,68 @@ const db = wx.cloud.database()
 const _ = db.command
 
 /**
+ * 获取分享明细
+ * @param {} openId 
+ * @param {*} date 
+ */
+function getShareDetailList(openId,date)
+{
+    return db.collection('mini_share_detail')
+    .where({
+        shareOpenId: openId,
+        date:date
+    })
+    .limit(5)
+    .get()
+}
+
+/**
+ * 获取会员信息
+ * @param {} openId 
+ */
+function getMemberInfo(openId) {
+    return db.collection('mini_member')
+        .where({
+            openId: openId
+        })
+        .limit(1)
+        .get()
+}
+
+/**
+ * 获取会员列表
+ * @param {*} applyStatus 
+ * @param {*} page 
+ */
+function getMemberInfoList(page,applyStatus){
+    return db.collection('mini_member')
+    .where({
+        applyStatus: applyStatus
+    })
+    .orderBy('modifyTime', 'desc')
+    .skip((page - 1) * 10)
+    .limit(10)
+    .get()
+}
+
+/**
+ * 获取积分明细列表
+ * @param {*} page 
+ * @param {*} openId 
+ */
+function getPointsDetailList(page,openId)
+{
+    return db.collection('mini_point_detail')
+    .where({
+        openId: openId
+    })
+    .orderBy('createTime', 'desc')
+    .skip((page - 1) * 20)
+    .limit(20)
+    .get()
+}
+
+/**
  * 获取评论列表
  */
 function getCommentsList(page, flag) {
@@ -89,7 +151,7 @@ function getNewPostsList(page, filter, orderBy) {
 
     //不包含某个标签
     if (filter.containLabel == 2) {
-        where.label =_.nin([filter.label])
+        where.label = _.nin([filter.label])
     }
 
     //包含某个标签
@@ -218,7 +280,8 @@ function getPostDetail(id) {
         name: 'postsService',
         data: {
             action: "getPostsDetail",
-            id: id
+            id: id,
+            type: 1
         }
     })
 }
@@ -257,13 +320,13 @@ function deletePostCollectionOrZan(postId, type) {
 /**
  * 新增评论
  */
-function addPostComment(commentContent,accept) {
+function addPostComment(commentContent, accept) {
     return wx.cloud.callFunction({
         name: 'postsService',
         data: {
             action: "addPostComment",
             commentContent: commentContent,
-            accept:accept
+            accept: accept
         }
     })
 }
@@ -291,7 +354,7 @@ function addPostZan(data) {
  * @param {} id 
  * @param {*} comments 
  */
-function addPostChildComment(id, postId, comments,accept) {
+function addPostChildComment(id, postId, comments, accept) {
     return wx.cloud.callFunction({
         name: 'postsService',
         data: {
@@ -299,7 +362,7 @@ function addPostChildComment(id, postId, comments,accept) {
             id: id,
             comments: comments,
             postId: postId,
-            accept:accept
+            accept: accept
         }
     })
 }
@@ -317,6 +380,16 @@ function addPostQrCode(postId, timestamp) {
             action: "addPostQrCode",
             timestamp: timestamp,
             postId: postId
+        }
+    })
+}
+
+function checkPostComment(content) {
+    return wx.cloud.callFunction({
+        name: 'postsService',
+        data: {
+            action: "checkPostComment",
+            content: content
         }
     })
 }
@@ -364,12 +437,12 @@ function querySubscribeCount(templateId) {
         name: 'messageService',
         data: {
             action: "querySubscribeCount",
-            templateId:templateId
+            templateId: templateId
         }
     })
 }
 
-function getTemplateList(){
+function getTemplateList() {
     return wx.cloud.callFunction({
         name: 'messageService',
         data: {
@@ -378,12 +451,12 @@ function getTemplateList(){
     })
 }
 
-function addSubscribeCount(templateIds){
+function addSubscribeCount(templateIds) {
     return wx.cloud.callFunction({
         name: 'messageService',
         data: {
             action: "addSubscribeCount",
-            templateIds:templateIds
+            templateIds: templateIds
         }
     })
 }
@@ -594,14 +667,14 @@ function getClassifyList() {
 /**
  * 获取label集合
  */
-function updateBatchPostsClassify(classify,operate,posts) {
+function updateBatchPostsClassify(classify, operate, posts) {
     return wx.cloud.callFunction({
         name: 'adminService',
         data: {
             action: "updateBatchPostsClassify",
-            posts:posts,
-            operate:operate,
-            classify:classify
+            posts: posts,
+            operate: operate,
+            classify: classify
         }
     })
 }
@@ -609,14 +682,132 @@ function updateBatchPostsClassify(classify,operate,posts) {
 /**
  * 获取label集合
  */
-function updateBatchPostsLabel(label,operate,posts) {
+function updateBatchPostsLabel(label, operate, posts) {
     return wx.cloud.callFunction({
         name: 'adminService',
         data: {
             action: "updateBatchPostsLabel",
-            posts:posts,
-            operate:operate,
-            label:label
+            posts: posts,
+            operate: operate,
+            label: label
+        }
+    })
+}
+
+function upsertAdvertConfig(advert) {
+    return wx.cloud.callFunction({
+        name: 'adminService',
+        data: {
+            action: "upsertAdvertConfig",
+            advert: advert
+        }
+    })
+}
+
+function getAdvertConfig() {
+    return wx.cloud.callFunction({
+        name: 'adminService',
+        data: {
+            action: "getAdvertConfig"
+        }
+    })
+}
+
+/**
+ * 新增签到
+ */
+function addSign(info) {
+    return wx.cloud.callFunction({
+        name: 'memberService',
+        data: {
+            action: "addSign",
+            info: info
+        }
+    })
+}
+
+/**
+ * 补充签到
+ */
+function addSignAgain(info) {
+    return wx.cloud.callFunction({
+        name: 'memberService',
+        data: {
+            action: "addSignAgain",
+            info: info
+        }
+    })
+}
+
+/**
+ * 新增积分
+ */
+function addPoints(taskType,info) {
+    return wx.cloud.callFunction({
+        name: 'memberService',
+        data: {
+            action: "addPoints",
+            taskType: taskType,
+            info:info
+        }
+    })
+}
+
+/**
+ * 分享得积分
+ * @param {*} info 
+ */
+function addShareDetail(info)
+{
+    return wx.cloud.callFunction({
+        name: 'memberService',
+        data: {
+            action: "addShareDetail",
+            info:info
+        }
+    })
+}
+
+/**
+ * 申请VIP
+ * @param {}}  
+ */
+function applyVip(info) {
+    return wx.cloud.callFunction({
+        name: 'memberService',
+        data: {
+            action: "applyVip",
+            info: info
+        }
+    })
+}
+
+/**
+ * 审核vip
+ * @param {}}  
+ */
+function approveApplyVip(id,apply,openId) {
+    return wx.cloud.callFunction({
+        name: 'adminService',
+        data: {
+            action: "approveApplyVip",
+            id: id,
+            apply:apply,
+            openId:openId
+        }
+    })
+}
+
+
+
+function getSignedDetail(openId, year,month) {
+    return wx.cloud.callFunction({
+        name: 'memberService',
+        data: {
+            action: "getSignedDetail",
+            openId: openId,
+            year: year,
+            month:month
         }
     })
 }
@@ -678,8 +869,22 @@ module.exports = {
     deletePostById: deletePostById,
     uploadFile: uploadFile,
     getTempUrl: getTempUrl,
-    updateBatchPostsLabel:updateBatchPostsLabel,
-    updateBatchPostsClassify:updateBatchPostsClassify,
-    getTemplateList:getTemplateList,
-    addSubscribeCount:addSubscribeCount
+    updateBatchPostsLabel: updateBatchPostsLabel,
+    updateBatchPostsClassify: updateBatchPostsClassify,
+    getTemplateList: getTemplateList,
+    addSubscribeCount: addSubscribeCount,
+    checkPostComment: checkPostComment,
+    upsertAdvertConfig: upsertAdvertConfig,
+    getAdvertConfig: getAdvertConfig,
+    addSign: addSign,
+    getMemberInfo: getMemberInfo,
+    getSignedDetail: getSignedDetail,
+    addPoints:addPoints,
+    applyVip:applyVip,
+    approveApplyVip:approveApplyVip,
+    getMemberInfoList:getMemberInfoList,
+    addShareDetail:addShareDetail,
+    getShareDetailList:getShareDetailList,
+    getPointsDetailList:getPointsDetailList,
+    addSignAgain:addSignAgain
 }
